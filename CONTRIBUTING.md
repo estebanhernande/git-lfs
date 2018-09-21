@@ -58,12 +58,11 @@ In general, contributors should develop on branches based off of `master` and pu
 ## Submitting a pull request
 
 0. [Fork][] and clone the repository
-0. Configure and install the dependencies: `script/bootstrap`
-0. Make sure the tests pass on your machine: `script/test`
+0. Configure and install the dependencies: `make`
+0. Make sure the tests pass on your machine: `make test`
 0. Create a new branch based on `master`: `git checkout -b <my-branch-name> master`
 0. Make your change, add tests, and make sure the tests still pass
 0. Push to your fork and [submit a pull request][pr] from your branch to `master`
-0. Accept the [GitHub CLA][cla]
 0. Pat yourself on the back and wait for your pull request to be reviewed
 
 Here are a few things you can do that will increase the likelihood of your pull request being accepted:
@@ -80,7 +79,7 @@ them as separate pull requests.
 
 ### Prerequisites
 
-Git LFS depends on having a working Go 1.7.3+ environment, with your standard
+Git LFS depends on having a working Go 1.11.0+ environment, with your standard
 `$GOROOT` and `$GOPATH` environment variables set.
 
 On RHEL etc. e.g. Red Hat Enterprise Linux Server release 7.2 (Maipo), you will neet the minimum packages installed to build Git LFS:
@@ -108,18 +107,18 @@ your projects in a specific directory, you can symlink it from `$GOPATH`:
     $ cd ~/path/to/your/projects
     $ ln -s $GOPATH/src/github.com/git-lfs/git-lfs
 
-From here, run `script/bootstrap` to build Git LFS in the `./bin` directory.
-Before submitting changes, be sure to run the Go tests and the shell integration
+From here, run `make` to build Git LFS in the `./bin` directory. Before
+submitting changes, be sure to run the Go tests and the shell integration
 tests:
 
-    $ script/test        # runs just the Go tests
-    $ script/integration # runs the shell tests in ./test
+    $ make test          # runs just the Go tests
+    $ cd t && make test  # runs the shell tests in ./test
     $ script/cibuild     # runs everything, with verbose debug output
 
 ## Updating 3rd party packages
 
-0. Update `glide.yaml`.
-0. Run `script/vendor` to update the code in the `vendor` directory.
+0. Update `go.mod`.
+0. Run `make vendor` to update the code in the `vendor` directory.
 0. Commit the change.  Git LFS vendors the full source code in the repository.
 0. Submit a pull request.
 
@@ -129,11 +128,11 @@ If you are the current maintainer:
 
 * Create a [new draft Release](https://github.com/git-lfs/git-lfs/releases/new).
 List any changes with links to related PRs.
-* Make sure your local dependencies are up to date: `script/bootstrap`
+* Make sure your local dependencies are up to date: `make vendor`
 * Ensure that tests are green: `script/cibuild`
 * Bump the version in `lfs/lfs.go`, [like this](https://github.com/git-lfs/git-lfs/commit/dd17828e4a6f2394cbba8621037199dc28f046e8).
 * Add the new version to the top of CHANGELOG.md
-* Build for all platforms with `script/bootstrap -all` (you need Go setup for
+* Build for all platforms with `make release` (you need Go setup for
 cross compiling with Mac, Linux, FreeBSD, and Windows support).
 * Test the command locally.  The compiled version will be in `bin/releases/{os}-{arch}/git-lfs-{version}/git-lfs`
 * Get the draft Release ID from the GitHub API: `curl -in https://api.github.com/repos/git-lfs/git-lfs/releases`
@@ -161,4 +160,3 @@ v1.5 just shipped, set the version in master to `1.6-pre`, for example.
 [fork]: https://github.com/git-lfs/git-lfs/fork
 [pr]: https://github.com/git-lfs/git-lfs/compare
 [style]: https://github.com/golang/go/wiki/CodeReviewComments
-[cla]: https://cla.github.com/git-lfs/git-lfs/accept

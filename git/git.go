@@ -245,7 +245,8 @@ func ResolveRef(ref string) (*Ref, error) {
 
 	if len(lines) == 1 {
 		// ref is a sha1 and has no symbolic-full-name
-		fullref.Name = lines[0] // fullref.Sha
+		fullref.Name = lines[0]
+		fullref.Sha = lines[0]
 		fullref.Type = RefTypeOther
 		return fullref, nil
 	}
@@ -653,6 +654,26 @@ func GitDir() (string, error) {
 	return "", nil
 }
 
+func GitCommonDir() (string, error) {
+	// Versions before 2.5.0 don't have the --git-common-dir option, since
+	// it came in with worktrees, so just fall back to the main Git
+	// directory.
+	if !IsGitVersionAtLeast("2.5.0") {
+		return GitDir()
+	}
+
+	cmd := gitNoLFS("rev-parse", "--git-common-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("Failed to call git rev-parse --git-dir: %v %v", err, string(out))
+	}
+	path := strings.TrimSpace(string(out))
+	if len(path) > 0 {
+		return filepath.Abs(path)
+	}
+	return "", nil
+}
+
 // GetAllWorkTreeHEADs returns the refs that all worktrees are using as HEADs
 // This returns all worktrees plus the master working copy, and works even if
 // working dir is actually in a worktree right now
@@ -974,7 +995,13 @@ func Fetch(remotes ...string) error {
 		return nil
 	}
 
-	_, err := gitNoLFSSimple(append([]string{"fetch"}, remotes...)...)
+	var args []string
+	if len(remotes) > 1 {
+		args = []string{"--multiple", "--"}
+	}
+	args = append(args, remotes...)
+
+	_, err := gitNoLFSSimple(append([]string{"fetch"}, args...)...)
 	return err
 }
 
@@ -1184,4 +1211,22 @@ func IsFileModified(filepath string) (bool, error) {
 	}
 
 	return matched, nil
+}
+
+// IsWorkingCopyDirty returns true if and only if the working copy in which the
+// command was executed is dirty as compared to the index.
+//
+// If the status of the working copy could not be determined, an error will be
+// returned instead.
+func IsWorkingCopyDirty() (bool, error) {
+	bare, err := IsBare()
+	if bare || err != nil {
+		return false, err
+	}
+
+	out, err := gitSimple("status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return len(out) != 0, nil
 }

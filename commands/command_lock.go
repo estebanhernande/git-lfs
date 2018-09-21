@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/git-lfs/git-lfs/errors"
 	"github.com/git-lfs/git-lfs/git"
@@ -79,10 +78,20 @@ func lockPath(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	wd, err = filepath.EvalSymlinks(wd)
+	if err != nil {
+		return "", errors.Wrapf(err,
+			"could not follow symlinks for %s", wd)
+	}
 
 	abs := filepath.Join(wd, file)
-	path := strings.TrimPrefix(abs, repo)
-	path = strings.TrimPrefix(path, string(os.PathSeparator))
+	path, err := filepath.Rel(repo, abs)
+	if err != nil {
+		return "", err
+	}
+
+	path = filepath.ToSlash(path)
+
 	if stat, err := os.Stat(abs); err != nil {
 		return "", err
 	} else {

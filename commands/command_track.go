@@ -49,6 +49,8 @@ func trackCommand(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Intentionally do _not_ consider global- and system-level
+	// .gitattributes here.
 	knownPatterns := git.GetAttributePaths(cfg.LocalWorkingDir(), cfg.LocalGitDir())
 	lineEnd := getAttributeLineEnding(knownPatterns)
 	if len(lineEnd) == 0 {
@@ -70,7 +72,7 @@ ArgsLoop:
 		pattern := trimCurrentPrefix(cleanRootPath(unsanitizedPattern))
 		if !trackNoModifyAttrsFlag {
 			for _, known := range knownPatterns {
-				if known.Path == filepath.Join(relpath, pattern) &&
+				if unescapeAttrPattern(known.Path) == filepath.Join(relpath, pattern) &&
 					((trackLockableFlag && known.Lockable) || // enabling lockable & already lockable (no change)
 						(trackNotLockableFlag && !known.Lockable) || // disabling lockable & not lockable (no change)
 						(!trackLockableFlag && !trackNotLockableFlag)) { // leave lockable as-is in all cases
@@ -130,7 +132,7 @@ ArgsLoop:
 					continue
 				}
 
-				pattern := fields[0]
+				pattern := unescapeAttrPattern(fields[0])
 				if newline, ok := changedAttribLines[pattern]; ok {
 					// Replace this line (newline already embedded)
 					attributesFile.WriteString(newline)
@@ -213,7 +215,7 @@ ArgsLoop:
 }
 
 func listPatterns() {
-	knownPatterns := git.GetAttributePaths(cfg.LocalWorkingDir(), cfg.LocalGitDir())
+	knownPatterns := getAllKnownPatterns()
 	if len(knownPatterns) < 1 {
 		return
 	}
@@ -226,6 +228,14 @@ func listPatterns() {
 			Print("    %s (%s)", t.Path, t.Source)
 		}
 	}
+}
+
+func getAllKnownPatterns() []git.AttributePath {
+	knownPatterns := git.GetAttributePaths(cfg.LocalWorkingDir(), cfg.LocalGitDir())
+	knownPatterns = append(knownPatterns, git.GetRootAttributePaths(cfg.Git)...)
+	knownPatterns = append(knownPatterns, git.GetSystemAttributePaths(cfg.Os)...)
+
+	return knownPatterns
 }
 
 func getAttributeLineEnding(attribs []git.AttributePath) string {

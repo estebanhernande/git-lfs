@@ -1,6 +1,7 @@
 package tq
 
 import (
+	"fmt"
 	"os"
 	"sort"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"github.com/git-lfs/git-lfs/errors"
 	"github.com/git-lfs/git-lfs/git"
 	"github.com/git-lfs/git-lfs/lfsapi"
+	"github.com/git-lfs/git-lfs/lfshttp"
 	"github.com/git-lfs/git-lfs/tools"
 	"github.com/rubyist/tracerx"
 )
@@ -127,6 +129,11 @@ type TransferQueue struct {
 	wait     sync.WaitGroup
 	manifest *Manifest
 	rc       *retryCounter
+
+	// unsupportedContentType indicates whether the transfer queue ever saw
+	// an HTTP 422 response indicating that their upload destination does
+	// not support Content-Type detection.
+	unsupportedContentType bool
 }
 
 // objects holds a set of objects.
@@ -531,7 +538,7 @@ func (q *TransferQueue) makeBatch() batch { return make(batch, 0, q.batchSize) }
 // closed.
 //
 // addToAdapter returns immediately, and does not block.
-func (q *TransferQueue) addToAdapter(e lfsapi.Endpoint, pending []*Transfer) <-chan *objectTuple {
+func (q *TransferQueue) addToAdapter(e lfshttp.Endpoint, pending []*Transfer) <-chan *objectTuple {
 	retries := make(chan *objectTuple, len(pending))
 
 	if err := q.ensureAdapterBegun(e); err != nil {
@@ -651,8 +658,13 @@ func (q *TransferQueue) handleTransferResult(
 			// If the error wasn't retriable, OR the object has
 			// exceeded its retry budget, it will be NOT be sent to
 			// the retry channel, and the error will be reported
-			// immediately.
-			q.errorc <- res.Error
+			// immediately (unless the error is in response to a
+			// HTTP 422).
+			if errors.IsUnprocessableEntityError(res.Error) {
+				q.unsupportedContentType = true
+			} else {
+				q.errorc <- res.Error
+			}
 			q.wait.Done()
 		}
 	} else {
@@ -718,7 +730,7 @@ func (q *TransferQueue) Skip(size int64) {
 	q.meter.Skip(size)
 }
 
-func (q *TransferQueue) ensureAdapterBegun(e lfsapi.Endpoint) error {
+func (q *TransferQueue) ensureAdapterBegun(e lfshttp.Endpoint) error {
 	q.adapterInitMutex.Lock()
 	defer q.adapterInitMutex.Unlock()
 
@@ -749,7 +761,7 @@ func (q *TransferQueue) ensureAdapterBegun(e lfsapi.Endpoint) error {
 	return nil
 }
 
-func (q *TransferQueue) toAdapterCfg(e lfsapi.Endpoint) AdapterConfig {
+func (q *TransferQueue) toAdapterCfg(e lfshttp.Endpoint) AdapterConfig {
 	apiClient := q.manifest.APIClient()
 	concurrency := q.manifest.ConcurrentTransfers()
 	if apiClient.Endpoints.AccessFor(e.Url) == lfsapi.NTLMAccess {
@@ -762,6 +774,17 @@ func (q *TransferQueue) toAdapterCfg(e lfsapi.Endpoint) AdapterConfig {
 		remote:              q.remote,
 	}
 }
+
+var (
+	// contentTypeWarning is the message printed when a server returns an
+	// HTTP 422 at the end of a push.
+	contentTypeWarning = []string{
+		"Uploading failed due to unsupported Content-Type header(s).",
+		"Consider disabling Content-Type detection with:",
+		"",
+		"  $ git config lfs.contenttype false",
+	}
+)
 
 // Wait waits for the queue to finish processing all transfers. Once Wait is
 // called, Add will no longer add transfers to the queue. Any failed
@@ -781,6 +804,12 @@ func (q *TransferQueue) Wait() {
 
 	q.meter.Flush()
 	q.errorwait.Wait()
+
+	if q.unsupportedContentType {
+		for _, line := range contentTypeWarning {
+			fmt.Fprintf(os.Stderr, "info: %s\n", line)
+		}
+	}
 }
 
 // Watch returns a channel where the queue will write the value of each transfer

@@ -9,8 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bgentry/go-netrc/netrc"
 	"github.com/git-lfs/git-lfs/errors"
+	"github.com/git-lfs/git-lfs/lfshttp"
+	"github.com/git-lfs/go-netrc/netrc"
 	"github.com/rubyist/tracerx"
 )
 
@@ -24,14 +25,18 @@ var (
 // authentication from netrc or git's credential helpers if necessary,
 // supporting basic and ntlm authentication.
 func (c *Client) DoWithAuth(remote string, req *http.Request) (*http.Response, error) {
-	req.Header = c.extraHeadersFor(req)
+	return c.doWithAuth(remote, req, nil)
+}
+
+func (c *Client) doWithAuth(remote string, req *http.Request, via []*http.Request) (*http.Response, error) {
+	req.Header = c.client.ExtraHeadersFor(req)
 
 	apiEndpoint, access, credHelper, credsURL, creds, err := c.getCreds(remote, req)
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := c.doWithCreds(req, credHelper, creds, credsURL, access)
+	res, err := c.doWithCreds(req, credHelper, creds, credsURL, access, via)
 	if err != nil {
 		if errors.IsAuthError(err) {
 			newAccess := getAuthAccess(res)
@@ -45,6 +50,12 @@ func (c *Client) DoWithAuth(remote string, req *http.Request) (*http.Response, e
 					req.Header.Del("Authorization")
 					credHelper.Reject(creds)
 				}
+
+				// This case represents a rejected request that
+				// should have been authenticated but wasn't. Do
+				// not count this against our redirection
+				// maximum, so do not recur through doWithAuth
+				// and instead call DoWithAuth.
 				return c.DoWithAuth(remote, req)
 			}
 		}
@@ -57,11 +68,23 @@ func (c *Client) DoWithAuth(remote string, req *http.Request) (*http.Response, e
 	return res, err
 }
 
-func (c *Client) doWithCreds(req *http.Request, credHelper CredentialHelper, creds Creds, credsURL *url.URL, access Access) (*http.Response, error) {
+func (c *Client) doWithCreds(req *http.Request, credHelper CredentialHelper, creds Creds, credsURL *url.URL, access Access, via []*http.Request) (*http.Response, error) {
 	if access == NTLMAccess {
 		return c.doWithNTLM(req, credHelper, creds, credsURL)
 	}
-	return c.do(req)
+
+	req.Header.Set("User-Agent", lfshttp.UserAgent)
+
+	redirectedReq, res, err := c.client.DoWithRedirect(c.client.HttpClient(req.Host), req, "", via)
+	if err != nil || res != nil {
+		return res, err
+	}
+
+	if redirectedReq == nil {
+		return res, errors.New("failed to redirect request")
+	}
+
+	return c.doWithAuth("", redirectedReq, via)
 }
 
 // getCreds fills the authorization header for the given request if possible,
@@ -84,7 +107,7 @@ func (c *Client) doWithCreds(req *http.Request, credHelper CredentialHelper, cre
 // 3. The Git Remote URL, which should be something like "https://git.com/repo.git"
 //    This URL is used for the Git Credential Helper. This way existing https
 //    Git remote credentials can be re-used for LFS.
-func (c *Client) getCreds(remote string, req *http.Request) (Endpoint, Access, CredentialHelper, *url.URL, Creds, error) {
+func (c *Client) getCreds(remote string, req *http.Request) (lfshttp.Endpoint, Access, CredentialHelper, *url.URL, Creds, error) {
 	ef := c.Endpoints
 	if ef == nil {
 		ef = defaultEndpointFinder
@@ -188,7 +211,7 @@ func setAuthFromNetrc(netrcFinder NetrcFinder, req *http.Request) bool {
 	return false
 }
 
-func getCredURLForAPI(ef EndpointFinder, operation, remote string, apiEndpoint Endpoint, req *http.Request) (*url.URL, error) {
+func getCredURLForAPI(ef EndpointFinder, operation, remote string, apiEndpoint lfshttp.Endpoint, req *http.Request) (*url.URL, error) {
 	apiURL, err := url.Parse(apiEndpoint.Url)
 	if err != nil {
 		return nil, err
@@ -270,6 +293,8 @@ func hasScheme(what string) bool {
 }
 
 func requestHasAuth(req *http.Request) bool {
+	// The "Authorization" string constant is safe, since we assume that all
+	// request headers have been canonicalized.
 	if len(req.Header.Get("Authorization")) > 0 {
 		return true
 	}

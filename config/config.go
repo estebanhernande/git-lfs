@@ -82,10 +82,7 @@ func (c *Configuration) readGitConfig(gitconfigs ...*git.ConfigurationSource) En
 	gf, extensions, uniqRemotes := readGitConfig(gitconfigs...)
 	c.extensions = extensions
 	c.remotes = make([]string, 0, len(uniqRemotes))
-	for remote, isOrigin := range uniqRemotes {
-		if isOrigin {
-			continue
-		}
+	for remote := range uniqRemotes {
 		c.remotes = append(c.remotes, remote)
 	}
 
@@ -232,8 +229,20 @@ func (c *Configuration) SetValidRemote(name string) error {
 	return nil
 }
 
+func (c *Configuration) SetValidPushRemote(name string) error {
+	if err := git.ValidateRemote(name); err != nil {
+		return err
+	}
+	c.SetPushRemote(name)
+	return nil
+}
+
 func (c *Configuration) SetRemote(name string) {
 	c.currentRemote = &name
+}
+
+func (c *Configuration) SetPushRemote(name string) {
+	c.pushRemote = &name
 }
 
 func (c *Configuration) Remotes() []string {
@@ -259,14 +268,17 @@ func (c *Configuration) SetLockableFilesReadOnly() bool {
 	return c.Os.Bool("GIT_LFS_SET_LOCKABLE_READONLY", true) && c.Git.Bool("lfs.setlockablereadonly", true)
 }
 
-func (c *Configuration) HookDir() string {
+// HookDir returns the location of the hooks owned by this repository. If the
+// core.hooksPath configuration variable is supported, we prefer that and expand
+// paths appropriately.
+func (c *Configuration) HookDir() (string, error) {
 	if git.IsGitVersionAtLeast("2.9.0") {
 		hp, ok := c.Git.Get("core.hooksPath")
 		if ok {
-			return hp
+			return tools.ExpandPath(hp, false)
 		}
 	}
-	return filepath.Join(c.LocalGitDir(), "hooks")
+	return filepath.Join(c.LocalGitDir(), "hooks"), nil
 }
 
 func (c *Configuration) InRepo() bool {
@@ -295,7 +307,8 @@ func (c *Configuration) loadGitDirs() {
 	if err != nil {
 		errMsg := err.Error()
 		tracerx.Printf("Error running 'git rev-parse': %s", errMsg)
-		if !strings.Contains(errMsg, "Not a git repository") {
+		if !strings.Contains(strings.ToLower(errMsg),
+			"not a git repository") {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", errMsg)
 		}
 		c.gitDir = &gitdir
@@ -310,8 +323,8 @@ func (c *Configuration) LocalGitStorageDir() string {
 	return c.Filesystem().GitStorageDir
 }
 
-func (c *Configuration) LocalReferenceDir() string {
-	return c.Filesystem().ReferenceDir
+func (c *Configuration) LocalReferenceDirs() []string {
+	return c.Filesystem().ReferenceDirs
 }
 
 func (c *Configuration) LFSStorageDir() string {
@@ -345,7 +358,12 @@ func (c *Configuration) Filesystem() *fs.Filesystem {
 
 	if c.fs == nil {
 		lfsdir, _ := c.Git.Get("lfs.storage")
-		c.fs = fs.New(c.LocalGitDir(), c.LocalWorkingDir(), lfsdir)
+		c.fs = fs.New(
+			c.Os,
+			c.LocalGitDir(),
+			c.LocalWorkingDir(),
+			lfsdir,
+		)
 	}
 
 	return c.fs

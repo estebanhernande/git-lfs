@@ -3,7 +3,6 @@ package githistory
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"reflect"
@@ -11,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/git-lfs/git-lfs/errors"
 	"github.com/git-lfs/git-lfs/filepathfilter"
-	"github.com/git-lfs/git-lfs/git/odb"
+	"github.com/git-lfs/gitobj"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,7 +21,7 @@ func TestRewriterRewritesHistory(t *testing.T) {
 	r := NewRewriter(db)
 
 	tip, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			contents, err := ioutil.ReadAll(b.Contents)
 			if err != nil {
 				return nil, err
@@ -34,7 +34,7 @@ func TestRewriterRewritesHistory(t *testing.T) {
 
 			rewritten := strconv.Itoa(n + 1)
 
-			return &odb.Blob{
+			return &gitobj.Blob{
 				Contents: strings.NewReader(rewritten),
 				Size:     int64(len(rewritten)),
 			}, nil
@@ -61,8 +61,8 @@ func TestRewriterRewritesHistory(t *testing.T) {
 	//
 	//   100644 blob e440e5c842586965a7fb77deda2eca68612b1f53   hello.txt
 
-	AssertCommitParent(t, db, hex.EncodeToString(tip), "911994ab82ce256433c1fa739dbbbc7142156289")
-	AssertCommitTree(t, db, "911994ab82ce256433c1fa739dbbbc7142156289", tree2)
+	AssertCommitParent(t, db, hex.EncodeToString(tip), "4aaa3f49ffeabbb874250fe13ffeb8c683aba650")
+	AssertCommitTree(t, db, "4aaa3f49ffeabbb874250fe13ffeb8c683aba650", tree2)
 
 	AssertBlobContents(t, db, tree2, "hello.txt", "3")
 
@@ -71,8 +71,8 @@ func TestRewriterRewritesHistory(t *testing.T) {
 	//
 	//   100644 blob d8263ee9860594d2806b0dfd1bfd17528b0ba2a4   hello.txt
 
-	AssertCommitParent(t, db, "911994ab82ce256433c1fa739dbbbc7142156289", "38679ebeba3403103196eb6272b326f96c928ace")
-	AssertCommitTree(t, db, "38679ebeba3403103196eb6272b326f96c928ace", tree3)
+	AssertCommitParent(t, db, "4aaa3f49ffeabbb874250fe13ffeb8c683aba650", "24a341e1ff75addc22e336a8d87f82ba56b86fcf")
+	AssertCommitTree(t, db, "24a341e1ff75addc22e336a8d87f82ba56b86fcf", tree3)
 
 	AssertBlobContents(t, db, tree3, "hello.txt", "2")
 }
@@ -82,8 +82,8 @@ func TestRewriterRewritesOctopusMerges(t *testing.T) {
 	r := NewRewriter(db)
 
 	tip, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
-			return &odb.Blob{
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
+			return &gitobj.Blob{
 				Contents: io.MultiReader(b.Contents, strings.NewReader("_new")),
 				Size:     b.Size + int64(len("_new")),
 			}, nil
@@ -112,14 +112,14 @@ func TestRewriterRewritesOctopusMerges(t *testing.T) {
 	//   parent 1fe2b9577d5610e8d8fb2c3030534036fb648393
 	//   parent ca447959bdcd20253d69b227bcc7c2e1d3126d5c
 
-	AssertCommitParent(t, db, hex.EncodeToString(tip), "89ab88fb7e11a439299aa2aa77a5d98f6629b750")
-	AssertCommitParent(t, db, hex.EncodeToString(tip), "adf1e9085f9dd263c1bec399b995ccfa5d994721")
+	AssertCommitParent(t, db, hex.EncodeToString(tip), "1fe2b9577d5610e8d8fb2c3030534036fb648393")
+	AssertCommitParent(t, db, hex.EncodeToString(tip), "ca447959bdcd20253d69b227bcc7c2e1d3126d5c")
 
 	// And each of those parents should contain the root commit as their own
 	// parent:
 
-	AssertCommitParent(t, db, "89ab88fb7e11a439299aa2aa77a5d98f6629b750", "52daca68bcf750bb86289fd95f92f5b3bd202328")
-	AssertCommitParent(t, db, "adf1e9085f9dd263c1bec399b995ccfa5d994721", "52daca68bcf750bb86289fd95f92f5b3bd202328")
+	AssertCommitParent(t, db, "1fe2b9577d5610e8d8fb2c3030534036fb648393", "9237567f379b3c83ddf53ad9a2ae3755afb62a09")
+	AssertCommitParent(t, db, "ca447959bdcd20253d69b227bcc7c2e1d3126d5c", "9237567f379b3c83ddf53ad9a2ae3755afb62a09")
 }
 
 func TestRewriterVisitsPackedObjects(t *testing.T) {
@@ -129,7 +129,7 @@ func TestRewriterVisitsPackedObjects(t *testing.T) {
 	var contents []byte
 
 	_, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			var err error
 
 			contents, err = ioutil.ReadAll(b.Contents)
@@ -137,7 +137,7 @@ func TestRewriterVisitsPackedObjects(t *testing.T) {
 				return nil, err
 			}
 
-			return &odb.Blob{
+			return &gitobj.Blob{
 				Contents: bytes.NewReader(contents),
 				Size:     int64(len(contents)),
 			}, nil
@@ -155,7 +155,7 @@ func TestRewriterDoesntVisitUnchangedSubtrees(t *testing.T) {
 	seen := make(map[string]int)
 
 	_, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			seen[path] = seen[path] + 1
 
 			return b, nil
@@ -173,12 +173,12 @@ func TestRewriterVisitsUniqueEntriesWithIdenticalContents(t *testing.T) {
 	r := NewRewriter(db)
 
 	tip, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			if path == "b.txt" {
 				return b, nil
 			}
 
-			return &odb.Blob{
+			return &gitobj.Blob{
 				Contents: strings.NewReader("changed"),
 				Size:     int64(len("changed")),
 			}, nil
@@ -188,10 +188,6 @@ func TestRewriterVisitsUniqueEntriesWithIdenticalContents(t *testing.T) {
 	assert.Nil(t, err)
 
 	tree := "bbbe0a7676523ae02234bfe874784ca2380c2d4b"
-
-	fmt.Println(hex.EncodeToString(tip))
-	root, _ := db.Root()
-	fmt.Println(root)
 
 	AssertCommitTree(t, db, hex.EncodeToString(tip), tree)
 
@@ -217,7 +213,7 @@ func TestRewriterIgnoresPathsThatDontMatchFilter(t *testing.T) {
 	seen := make(map[string]int)
 
 	_, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			seen[path] = seen[path] + 1
 
 			return b, nil
@@ -233,20 +229,20 @@ func TestRewriterAllowsAdditionalTreeEntries(t *testing.T) {
 	db := DatabaseFromFixture(t, "linear-history.git")
 	r := NewRewriter(db)
 
-	extra, err := db.WriteBlob(&odb.Blob{
+	extra, err := db.WriteBlob(&gitobj.Blob{
 		Contents: strings.NewReader("extra\n"),
 		Size:     int64(len("extra\n")),
 	})
 	assert.Nil(t, err)
 
 	tip, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			return b, nil
 		},
 
-		TreeCallbackFn: func(path string, tr *odb.Tree) (*odb.Tree, error) {
-			return &odb.Tree{
-				Entries: append(tr.Entries, &odb.TreeEntry{
+		TreeCallbackFn: func(path string, tr *gitobj.Tree) (*gitobj.Tree, error) {
+			return &gitobj.Tree{
+				Entries: append(tr.Entries, &gitobj.TreeEntry{
 					Name:     "extra.txt",
 					Filemode: 0100644,
 					Oid:      extra,
@@ -278,8 +274,8 @@ func TestRewriterAllowsAdditionalTreeEntries(t *testing.T) {
 	//   100644 blob d8263ee9860594d2806b0dfd1bfd17528b0ba2a4    hello.txt
 	//   100644 blob 0f2287157f7cb0dd40498c7a92f74b6975fa2d57    extra.txt
 
-	AssertCommitParent(t, db, hex.EncodeToString(tip), "54ca0fdd5ee455d872ce4b4e379abe1c4cdc39b3")
-	AssertCommitTree(t, db, "54ca0fdd5ee455d872ce4b4e379abe1c4cdc39b3", tree2)
+	AssertCommitParent(t, db, hex.EncodeToString(tip), "45af5deb9a25bc4069b15c1f5bdccb0340978707")
+	AssertCommitTree(t, db, "45af5deb9a25bc4069b15c1f5bdccb0340978707", tree2)
 
 	AssertBlobContents(t, db, tree2, "hello.txt", "2")
 	AssertBlobContents(t, db, tree2, "extra.txt", "extra\n")
@@ -290,11 +286,114 @@ func TestRewriterAllowsAdditionalTreeEntries(t *testing.T) {
 	//   100644 blob 56a6051ca2b02b04ef92d5150c9ef600403cb1de    hello.txt
 	//   100644 blob 0f2287157f7cb0dd40498c7a92f74b6975fa2d57    extra.txt
 
-	AssertCommitParent(t, db, "54ca0fdd5ee455d872ce4b4e379abe1c4cdc39b3", "4c52196256c611d18ad718b9b68b3d54d0a6686d")
-	AssertCommitTree(t, db, "4c52196256c611d18ad718b9b68b3d54d0a6686d", tree3)
+	AssertCommitParent(t, db, "45af5deb9a25bc4069b15c1f5bdccb0340978707", "99f6bd7cd69b45494afed95b026f3e450de8304f")
+	AssertCommitTree(t, db, "99f6bd7cd69b45494afed95b026f3e450de8304f", tree3)
 
 	AssertBlobContents(t, db, tree3, "hello.txt", "1")
 	AssertBlobContents(t, db, tree3, "extra.txt", "extra\n")
+}
+
+// CallbackCall is a structure recording information pertinent to when a
+// *githistory.Rewrite called either BlobFn, TreePreCallbackFn, or
+// TreeCallbackFn.
+type CallbackCall struct {
+	Type string
+	Path string
+}
+
+var (
+	// collectCalls is a function that returns a *RewriteOptions that
+	// updates a pointer to a slice of `*CallbackCall`'s with each call that
+	// is received.
+	collectCalls = func(calls *[]*CallbackCall) *RewriteOptions {
+		return &RewriteOptions{Include: []string{"refs/heads/master"},
+			BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
+				*calls = append(*calls, &CallbackCall{
+					Type: "blob",
+					Path: path,
+				})
+				return b, nil
+			},
+
+			TreePreCallbackFn: func(path string, t *gitobj.Tree) error {
+				*calls = append(*calls, &CallbackCall{
+					Type: "tree-pre",
+					Path: path,
+				})
+				return nil
+			},
+
+			TreeCallbackFn: func(path string, t *gitobj.Tree) (*gitobj.Tree, error) {
+				*calls = append(*calls, &CallbackCall{
+					Type: "tree-post",
+					Path: path,
+				})
+				return t, nil
+			},
+		}
+	}
+)
+
+func TestHistoryRewriterCallbacks(t *testing.T) {
+	var calls []*CallbackCall
+
+	db := DatabaseFromFixture(t, "linear-history.git")
+	r := NewRewriter(db)
+
+	_, err := r.Rewrite(collectCalls(&calls))
+
+	assert.Nil(t, err)
+
+	assert.Len(t, calls, 9)
+	assert.Equal(t, calls[0], &CallbackCall{Type: "tree-pre", Path: "/"})
+	assert.Equal(t, calls[1], &CallbackCall{Type: "blob", Path: "hello.txt"})
+	assert.Equal(t, calls[2], &CallbackCall{Type: "tree-post", Path: "/"})
+	assert.Equal(t, calls[3], &CallbackCall{Type: "tree-pre", Path: "/"})
+	assert.Equal(t, calls[4], &CallbackCall{Type: "blob", Path: "hello.txt"})
+	assert.Equal(t, calls[5], &CallbackCall{Type: "tree-post", Path: "/"})
+	assert.Equal(t, calls[6], &CallbackCall{Type: "tree-pre", Path: "/"})
+	assert.Equal(t, calls[7], &CallbackCall{Type: "blob", Path: "hello.txt"})
+	assert.Equal(t, calls[8], &CallbackCall{Type: "tree-post", Path: "/"})
+}
+
+func TestHistoryRewriterCallbacksSubtrees(t *testing.T) {
+	var calls []*CallbackCall
+
+	db := DatabaseFromFixture(t, "non-repeated-subtrees.git")
+	r := NewRewriter(db)
+
+	_, err := r.Rewrite(collectCalls(&calls))
+
+	assert.Nil(t, err)
+
+	assert.Len(t, calls, 8)
+	assert.Equal(t, calls[0], &CallbackCall{Type: "tree-pre", Path: "/"})
+	assert.Equal(t, calls[1], &CallbackCall{Type: "blob", Path: "a.txt"})
+	assert.Equal(t, calls[2], &CallbackCall{Type: "tree-post", Path: "/"})
+	assert.Equal(t, calls[3], &CallbackCall{Type: "tree-pre", Path: "/"})
+	assert.Equal(t, calls[4], &CallbackCall{Type: "tree-pre", Path: "/subdir"})
+	assert.Equal(t, calls[5], &CallbackCall{Type: "blob", Path: "subdir/b.txt"})
+	assert.Equal(t, calls[6], &CallbackCall{Type: "tree-post", Path: "/subdir"})
+	assert.Equal(t, calls[7], &CallbackCall{Type: "tree-post", Path: "/"})
+}
+
+func TestHistoryRewriterTreePreCallbackPropagatesErrors(t *testing.T) {
+	expected := errors.Errorf("my error")
+
+	db := DatabaseFromFixture(t, "linear-history.git")
+	r := NewRewriter(db)
+
+	_, err := r.Rewrite(&RewriteOptions{Include: []string{"refs/heads/master"},
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
+			return b, nil
+		},
+
+		TreePreCallbackFn: func(path string, t *gitobj.Tree) error {
+			return expected
+		},
+	})
+
+	assert.Equal(t, err, expected)
 }
 
 func TestHistoryRewriterUseOriginalParentsForPartialMigration(t *testing.T) {
@@ -305,7 +404,7 @@ func TestHistoryRewriterUseOriginalParentsForPartialMigration(t *testing.T) {
 		Include: []string{"refs/heads/master"},
 		Exclude: []string{"refs/tags/middle"},
 
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			return b, nil
 		},
 	})
@@ -342,10 +441,10 @@ func TestHistoryRewriterUpdatesRefs(t *testing.T) {
 
 		UpdateRefs: true,
 
-		BlobFn: func(path string, b *odb.Blob) (*odb.Blob, error) {
+		BlobFn: func(path string, b *gitobj.Blob) (*gitobj.Blob, error) {
 			suffix := strings.NewReader("_suffix")
 
-			return &odb.Blob{
+			return &gitobj.Blob{
 				Contents: io.MultiReader(b.Contents, suffix),
 				Size:     b.Size + int64(suffix.Len()),
 			}, nil
@@ -355,8 +454,8 @@ func TestHistoryRewriterUpdatesRefs(t *testing.T) {
 	assert.Nil(t, err)
 
 	c1 := hex.EncodeToString(tip)
-	c2 := "86f7ba8f02edaca4f980cdd584ea8899e18b840c"
-	c3 := "d73b8c1a294e2371b287d9b75dbed82328ad446e"
+	c2 := "66561fe3ae68651658e18e48053dcfe66a2e9da1"
+	c3 := "8268d8486c48024a871fa42fc487dbeabd6e3d86"
 
 	AssertRef(t, db, "refs/heads/master", tip)
 
@@ -373,4 +472,19 @@ func TestHistoryRewriterReturnsFilter(t *testing.T) {
 
 	assert.Equal(t, expected, got,
 		"git/githistory: expected Rewriter.Filter() to return same *filepathfilter.Filter instance")
+}
+
+// debug is meant to be called from a defer statement to aide in debugging a
+// test failure among any in this file.
+//
+// Callers are expected to call it immediately after calling the Rewrite()
+// function.
+func debug(t *testing.T, db *gitobj.ObjectDatabase, tip []byte, err error) {
+	root, ok := db.Root()
+
+	t.Log(strings.Repeat("*", 80))
+	t.Logf("* root=%s, ok=%t\n", root, ok)
+	t.Logf("* tip=%x\n", tip)
+	t.Logf("* err=%s\n", err)
+	t.Log(strings.Repeat("*", 80))
 }
